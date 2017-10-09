@@ -69,7 +69,7 @@ quick_main!(|| -> Result<()> {
 
     let matches = app.get_matches();
 
-    loggerv::init_with_verbosity(matches.occurrences_of("debug")).unwrap();
+    loggerv::init_with_verbosity(1+matches.occurrences_of("debug")).unwrap();
 
     debug!("{} version {}", crate_name!(), crate_version!());
     debug!("OS:      {}",
