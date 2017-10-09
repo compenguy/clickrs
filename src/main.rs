@@ -39,7 +39,7 @@ quick_main!(|| -> Result<()> {
         .arg(clap::Arg::with_name("initial_delay_ms")
             .short("d")
             .short("delay")
-            .help("Delay in msecs before sending any input events. Default: 250.")
+            .help("Delay in msecs before sending any input events.")
             .value_name("N")
             .takes_value(true)
             .required(false)
@@ -69,7 +69,8 @@ quick_main!(|| -> Result<()> {
 
     let matches = app.get_matches();
 
-    loggerv::init_with_verbosity(1+matches.occurrences_of("debug")).unwrap();
+    // Start logging at "info" verbosity
+    loggerv::init_with_verbosity(1 + matches.occurrences_of("debug")).unwrap();
 
     debug!("{} version {}", crate_name!(), crate_version!());
     debug!("OS:      {}",
@@ -87,6 +88,12 @@ quick_main!(|| -> Result<()> {
         .map(|str| str.to_owned()))));
     let mut event_queue = InputEventQueue::new(display);
 
+    if matches.occurrences_of("mousebutton_and_interval") == 0 &&
+       matches.occurrences_of("keypress_and_interval") == 0 {
+        warn!("No events specified.  Nothing to do...");
+        println!("{}", matches.usage());
+        return Ok(());
+    }
 
     if let Some(mevent_strs) = matches.values_of("mousebutton_and_interval") {
         for event_str in mevent_strs {
