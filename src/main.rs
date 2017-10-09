@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::Mutex;
 use std::string::String;
 
 #[macro_use]
@@ -41,7 +42,8 @@ quick_main!(|| -> Result<()> {
             .help("Delay in msecs before sending any input events. Default: 250.")
             .value_name("N")
             .takes_value(true)
-            .required(false))
+            .required(false)
+            .default_value("250"))
         .arg(clap::Arg::with_name("mousebutton_and_interval")
             .short("m")
             .short("mousebutton-and-interval")
@@ -81,7 +83,7 @@ quick_main!(|| -> Result<()> {
     info!("{}", crate_description!());
     info!("Created by {}", crate_authors!());
 
-    let display = Arc::new(Mutex::new(XContext::new(matches.value_of("displayname")
+    let display = Rc::new(Mutex::new(XContext::new(matches.value_of("displayname")
         .map(|str| str.to_owned()))));
     let mut event_queue = InputEventQueue::new(display);
 
@@ -103,8 +105,6 @@ quick_main!(|| -> Result<()> {
     };
 
     debug!("All input events: {:?}", event_queue);
-    for _ in 0..25 {
-        event_queue.run_next()?;
-    }
-    Ok(())
+    let start_delay_ms: u64 = matches.value_of("initial_delay_ms").unwrap().parse().unwrap();
+    event_queue.start(start_delay_ms)
 });

@@ -2,13 +2,22 @@ use std::fmt;
 use std::time;
 use std::thread;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Mutex;
 use std::ptr;
+use std::num::Wrapping;
 
 use regex::Regex;
 use x11::xlib;
+use x11::xtest;
 
 use errors::{Result, ErrorKind};
+
+
+// X11/extensions/XKB.h:#define    XkbUseCoreKbd           0x0100
+const XKBUSECOREKBD: u32 = 0x0100;
+
 
 #[derive(Debug)]
 #[derive(Clone)]
@@ -38,16 +47,13 @@ impl XContext {
             }
         }
     }
-    unsafe fn xdisplay(&mut self) -> *mut xlib::Display {
-        self.display as *mut xlib::Display
-    }
 }
 
 #[derive(Debug)]
 #[derive(Clone)]
 pub enum InputType {
     Keyboard(String),
-    Mouse(u8),
+    Mouse(u32),
 }
 
 impl fmt::Display for InputType {
@@ -129,16 +135,18 @@ impl InputEvent {
 #[derive(Clone)]
 pub struct InputEventQueue {
     events: VecDeque<InputEvent>,
-    display: Arc<Mutex<XContext>>,
+    xctx: Rc<Mutex<XContext>>,
     last_active: time::Instant,
+    key_name_to_code: HashMap<String, u32>,
 }
 
 impl InputEventQueue {
-    pub fn new(display: Arc<Mutex<XContext>>) -> Self {
+    pub fn new(xctx: Rc<Mutex<XContext>>) -> Self {
         InputEventQueue {
             events: VecDeque::new(),
-            display: display,
+            xctx: xctx,
             last_active: time::Instant::now(),
+            key_name_to_code: HashMap::new(),
         }
     }
 
@@ -162,7 +170,20 @@ impl InputEventQueue {
         self.events.len()
     }
 
+    fn add_keycode_to_lookup(&mut self, event: &InputEvent) {
+        if let InputType::Keyboard(ref key) = event.event {
+            if self.key_name_to_code.contains_key(key) {
+                return;
+            }
+            let xctx = self.xctx.lock().unwrap();
+            let keysym = unsafe { xlib::XStringToKeysym(key.as_ptr() as *const i8) };
+            let keycode = unsafe { xlib::XKeysymToKeycode(xctx.display, keysym) };
+            self.key_name_to_code.insert(key.to_owned(), u32::from(keycode));
+        }
+    }
+
     pub fn add_event(&mut self, mut event: InputEvent) {
+        self.add_keycode_to_lookup(&event);
         let insert_index = self.find_insertion_point(&mut event);
         if let Some(ref mut next_event) = self.events.get_mut(insert_index) {
             debug!("current time delta for next event: {}",
@@ -204,11 +225,51 @@ impl InputEventQueue {
         Ok(())
     }
 
+    pub fn paused(&self) -> bool {
+        debug!("Querying numlock state");
+        let mut indicators: u32 = 0;
+        let xctx = self.xctx.lock().unwrap();
+        unsafe {
+            xlib::XkbGetIndicatorState(xctx.display, XKBUSECOREKBD, &mut indicators as *mut u32);
+        }
+        // Checking numlock state
+        (indicators & 0x02) != 0x02
+    }
+
+    pub fn start(&mut self, start_delay_ms: u64) -> Result<()> {
+        thread::sleep(time::Duration::from_millis(start_delay_ms));
+        let pause_poll = time::Duration::from_millis(500);
+        let mut noise_ctl = Wrapping(0_u64);
+        loop {
+            while !self.paused() {
+                self.run_next()?;
+            }
+            if noise_ctl.0 % 10 == 0 {
+                info!("Paused...");
+            }
+            noise_ctl += Wrapping(1_u64);
+            thread::sleep(pause_poll);
+        }
+    }
+
     fn do_event(&self, event: &InputEvent) -> Result<()> {
-        // TODO: actually do the event
-        let secs_fl: f32 = event.interval.as_secs() as f32;
-        let subsecs_fl: f32 = (event.interval.subsec_nanos() as f32) / 1000000000.0;
-        info!("{} (next in {:2.3}s)", event.event, secs_fl + subsecs_fl);
+        info!("{} (next in {:2.3}s)",
+              event.event,
+              duration_as_f32(event.interval));
+        let xctx = self.xctx.lock().unwrap();
+        match event.event {
+            InputType::Mouse(ref button) => unsafe {
+                xtest::XTestFakeButtonEvent(xctx.display, *button, 1, 0);
+                xtest::XTestFakeButtonEvent(xctx.display, *button, 0, 0);
+            },
+            InputType::Keyboard(ref key) => unsafe {
+                xtest::XTestFakeKeyEvent(xctx.display, self.key_name_to_code[key], 1, 0);
+                xtest::XTestFakeKeyEvent(xctx.display, self.key_name_to_code[key], 0, 0);
+            },
+        }
+        unsafe {
+            xlib::XFlush(xctx.display);
+        }
         Ok(())
     }
 }
