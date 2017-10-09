@@ -241,6 +241,7 @@ impl InputEventQueue {
         let pause_poll = time::Duration::from_millis(500);
         let mut noise_ctl = Wrapping(0_u64);
         loop {
+
             while !self.paused() {
                 self.run_next()?;
             }
@@ -249,6 +250,7 @@ impl InputEventQueue {
             }
             noise_ctl += Wrapping(1_u64);
             thread::sleep(pause_poll);
+            self.last_active = time::Instant::now();
         }
     }
 
