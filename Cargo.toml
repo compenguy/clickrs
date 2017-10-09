@@ -1,0 +1,19 @@
+[package]
+name = "clickrs"
+version = "0.1.0"
+authors = ["Will Page <compenguy@gmail.com>"]
+license = "MIT"
+description = "X11 automated keypresser"
+
+[dependencies]
+log = "0.3"
+loggerv = "0.4.0"
+clap = "2.25.1"
+sys-info = "0.4.1"
+regex = "0.2"
+time = "0.1"
+lazy_static = "0.2.4"
+error-chain = "0.11.0"
+x11 = { version = "2.15.0", features = ["xlib", "xtest" ] }
+tokio-core = "0.1"
+futures = "0.1.9"
