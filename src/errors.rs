@@ -1,15 +1,26 @@
-error_chain! {
-    foreign_links {
-        ParseInt(::std::num::ParseIntError);
-    }
-    errors {
-        InvalidMouseEventSpec(e: String) {
-            description("provided mouse event specification is not valid")
-            display("mouse event specification {} is not valid", e)
-        }
-        InvalidKeyboardEventSpec(e: String) {
-            description("provided keyboard event specification is not valid")
-            display("keyboard event specification {} is not valid", e)
+#[derive(Debug)]
+pub enum Error {
+    InvalidMouseEventSpec(String),
+    InvalidKeyboardEventSpec(String),
+}
+
+impl Error {
+    fn description(&self) -> String {
+        match self {
+            Error::InvalidMouseEventSpec(s) => {
+                format!("Mouse event specification {} is not valid.", s)
+            }
+            Error::InvalidKeyboardEventSpec(s) => {
+                format!("Keyboard event specification {} is not valid.", s)
+            }
         }
     }
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.description())
+    }
+}
+
+impl std::error::Error for Error {}
