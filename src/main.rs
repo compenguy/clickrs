@@ -1,26 +1,17 @@
+#![feature(async_stream)]
+
 use std::rc::Rc;
-use std::string::String;
 use std::sync::Mutex;
 
+use clap::{app_from_crate, crate_name, crate_version, crate_description, crate_authors};
 use anyhow::Result;
 
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-extern crate loggerv;
-extern crate sys_info;
-
-extern crate regex;
-extern crate x11;
-
 mod errors;
-
 mod inputsource;
-use crate::inputsource::{InputEvent, InputEventQueue, XContext};
+use crate::inputsource::{InputEventSource, InputStreamReader, XContext};
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let app = app_from_crate!("")
         .setting(clap::AppSettings::ColorAuto)
         .setting(clap::AppSettings::ColoredHelp)
@@ -77,54 +68,54 @@ fn main() -> Result<()> {
     // Start logging at "info" verbosity
     loggerv::init_with_verbosity(1 + matches.occurrences_of("debug")).unwrap();
 
-    debug!("{} version {}", crate_name!(), crate_version!());
-    debug!(
+    log::debug!("{} version {}", crate_name!(), crate_version!());
+    log::debug!(
         "OS:      {}",
         sys_info::os_type().unwrap_or_else(|_| "Unknown".to_owned())
     );
-    debug!(
+    log::debug!(
         "Release: {}",
         sys_info::os_release().unwrap_or_else(|_| "Unknown".to_owned())
     );
-    debug!(
+    log::debug!(
         "Host:    {}",
         sys_info::hostname().unwrap_or_else(|_| "Unknown".to_owned())
     );
 
-    info!("Welcome to {} version {}!", crate_name!(), crate_version!());
-    info!("{}", crate_description!());
-    info!("Created by {}", crate_authors!());
+    log::info!("Welcome to {} version {}!", crate_name!(), crate_version!());
+    log::info!("{}", crate_description!());
+    log::info!("Created by {}", crate_authors!());
 
     let display = Rc::new(Mutex::new(XContext::new(
         matches.value_of("displayname").map(|str| str.to_owned()),
     )));
-    let mut event_queue = InputEventQueue::new(display);
+    let mut event_queue = InputStreamReader::new(display);
 
     if matches.occurrences_of("mousebutton_and_interval") == 0
         && matches.occurrences_of("keypress_and_interval") == 0
     {
-        warn!("No events specified.  Nothing to do...");
+        log::warn!("No events specified.  Nothing to do...");
         println!("{}", matches.usage());
         return Ok(());
     }
 
     if let Some(mevent_strs) = matches.values_of("mousebutton_and_interval") {
         for event_str in mevent_strs {
-            event_queue.add_event(InputEvent::parse_mouse(event_str)?);
+            event_queue.add_event(InputEventSource::from_mouse_spec(event_str)?);
         }
     } else {
-        info!("No mousebutton events specified.");
+        log::info!("No mousebutton events specified.");
     };
 
     if let Some(kevent_strs) = matches.values_of("keypress_and_interval") {
         for event_str in kevent_strs {
-            event_queue.add_event(InputEvent::parse_key(event_str)?);
+            event_queue.add_event(InputEventSource::from_key_spec(event_str)?);
         }
     } else {
-        info!("No key events specified.");
+        log::info!("No key events specified.");
     };
 
-    debug!("All input events: {:?}", event_queue);
+    log::debug!("All input events: {:?}", event_queue);
     let start_delay_ms: u64 = matches
         .value_of("initial_delay_ms")
         .unwrap()

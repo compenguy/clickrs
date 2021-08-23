@@ -1,12 +1,13 @@
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::fmt;
 use std::num::Wrapping;
 use std::ptr;
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::thread;
-use std::time;
+use std::time::Duration;
+use std::task::{Context, Poll};
+use std::pin::Pin;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -82,7 +83,7 @@ impl XContext {
                 let keysym = xlib::XStringToKeysym(key_name.as_ptr() as *const i8);
                 xlib::XKeysymToKeycode(display, keysym)
             });
-        debug!("{} -> {}", key_name, *keycode);
+        log::debug!("{} -> {}", key_name, *keycode);
         *keycode
     }
 
@@ -164,72 +165,6 @@ impl XContext {
         self.restore_original_window(saved);
         self.flush_events();
     }
-    /*
-    pub fn get_root(&self) -> xlib::Window {
-        unsafe {
-            xlib::XDefaultRootWindow(self.display)
-        }
-    }
-
-    pub fn key_xevent(&mut self, key_name: &str) {
-        let keycode = self.keycode_lookup(key_name);
-        let window = self.window.unwrap_or(xlib::PointerWindow as xlib::Window);
-        let mut event = xlib::XEvent {
-            key: xlib::XKeyEvent {
-                type_: xlib::KeyPress,
-                serial: 0,
-                send_event: xlib::True,
-                display: self.display,
-                window,
-                root: self.get_root(),
-                subwindow: XNONE as xlib::Window,
-                time: xlib::CurrentTime,
-                x: 1,
-                y: 1,
-                x_root: 1,
-                y_root: 1,
-                state: XNONE as std::os::raw::c_uint,
-                keycode: keycode as u32,
-                same_screen: xlib::True,
-            }
-        };
-        unsafe { xlib::XSendEvent(event.key.display, event.key.window, xlib::True, xlib::KeyPressMask, &mut event as *mut xlib::XEvent) };
-        event.type_ = xlib::KeyRelease;
-        unsafe {
-            xlib::XSendEvent(event.key.display, event.key.window, xlib::True, xlib::KeyReleaseMask, &mut event as *mut xlib::XEvent);
-            xlib::XFlush(self.display);
-        }
-    }
-
-    pub fn mouse_xevent(&self, button: u8) {
-        let window = self.window.unwrap_or(xlib::PointerWindow as xlib::Window);
-        let mut event = xlib::XEvent {
-            button: xlib::XButtonEvent {
-                type_: xlib::ButtonPress,
-                serial: 0,
-                send_event: xlib::True,
-                display: self.display,
-                window,
-                root: self.get_root(),
-                subwindow: XNONE as xlib::Window,
-                time: xlib::CurrentTime,
-                x: 1,
-                y: 1,
-                x_root: 1,
-                y_root: 1,
-                state: XNONE as std::os::raw::c_uint,
-                button: button as u32,
-                same_screen: xlib::True,
-            }
-        };
-        unsafe { xlib::XSendEvent(event.button.display, event.button.window, xlib::True, xlib::ButtonPressMask, &mut event as *mut xlib::XEvent) };
-        event.type_ = xlib::ButtonRelease;
-        unsafe {
-            xlib::XSendEvent(event.button.display, event.button.window, xlib::True, xlib::ButtonReleaseMask, &mut event as *mut xlib::XEvent);
-            xlib::XFlush(self.display);
-        }
-    }
-    */
 }
 
 #[derive(Debug, Clone)]
@@ -257,30 +192,33 @@ impl fmt::Display for InputType {
     }
 }
 
-fn duration_as_f32(duration: time::Duration) -> f32 {
+fn duration_as_f32(duration: Duration) -> f32 {
     (duration.as_secs() as f32) + ((duration.subsec_nanos() as f32) / 1000000000.0)
 }
 
-#[derive(Debug, Clone)]
-pub struct InputEvent {
-    pub event: InputType,
-    pub interval: time::Duration,
-    pub remaining: time::Duration,
+#[derive(Debug)]
+pub struct InputEventSource {
+    event: InputType,
+    timer: tokio::time::Interval,
+    interval: Duration,
 }
 
-impl fmt::Display for InputEvent {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} every {:?}", self.event, self.interval)?;
-        if self.remaining > time::Duration::from_millis(0) {
-            write!(f, " ({:?} remaining)", self.remaining)?;
+impl std::stream::Stream for InputEventSource {
+    type Item = InputType;
+
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if std::pin::Pin::new(&mut self.timer).poll_next(cx).is_pending() {
+            return Poll::Pending;
         }
-        Ok(())
+        let interval = self.interval;
+        let _ = std::mem::replace(&mut self.timer, tokio::time::interval(interval));
+        Poll::Ready(Some(self.event.clone()))
     }
 }
 
-impl InputEvent {
-    pub fn parse_mouse(arg: &str) -> Result<Self> {
-        debug!("Parsing mouse str option {}.", arg);
+impl InputEventSource {
+    pub fn from_mouse_spec(arg: &str) -> Result<Self> {
+        log::debug!("Parsing mouse str option {}.", arg);
 
         if let Some(caps) = MOUSE_SPEC_RE
             .lock()
@@ -292,23 +230,23 @@ impl InputEvent {
                 .ok_or_else(|| Error::InvalidMouseEventSpec(arg.to_owned()))?
                 .as_str()
                 .parse()?;
-            let interval = caps
+            let interval = Duration::from_millis(caps
                 .name("interval")
                 .ok_or_else(|| Error::InvalidMouseEventSpec(arg.to_owned()))?
                 .as_str()
-                .parse()?;
-            Ok(InputEvent {
+                .parse()?);
+            Ok(InputEventSource {
                 event: InputType::Mouse(button),
-                interval: time::Duration::from_millis(interval),
-                remaining: time::Duration::from_millis(0),
+                timer: tokio::time::interval(interval),
+                interval,
             })
         } else {
             Err(Error::InvalidMouseEventSpec(arg.to_owned()).into())
         }
     }
 
-    pub fn parse_key(arg: &str) -> Result<Self> {
-        debug!("Parsing keyboard str option {}.", arg);
+    pub fn from_key_spec(arg: &str) -> Result<Self> {
+        log::debug!("Parsing keyboard str option {}.", arg);
 
         if let Some(caps) = KEY_SPEC_RE
             .lock()
@@ -320,121 +258,55 @@ impl InputEvent {
                 .ok_or_else(|| Error::InvalidKeyboardEventSpec(arg.to_owned()))?
                 .as_str()
                 .to_owned();
-            let interval = caps
+            let interval = Duration::from_millis(caps
                 .name("interval")
                 .ok_or_else(|| Error::InvalidKeyboardEventSpec(arg.to_owned()))?
                 .as_str()
-                .parse()?;
-            Ok(InputEvent {
+                .parse()?);
+            Ok(InputEventSource {
                 event: InputType::Keyboard(key),
-                interval: time::Duration::from_millis(interval),
-                remaining: time::Duration::from_millis(0),
+                timer: tokio::time::interval(interval),
+                interval,
             })
         } else {
             Err(Error::InvalidKeyboardEventSpec(arg.to_owned()).into())
         }
     }
+
+    pub fn reset(self: Pin<&mut Self>) {
+        let _ = std::mem::replace(&mut self.timer, tokio::time::interval(self.interval.clone()));
+    }
 }
 
-#[derive(Debug, Clone)]
-pub struct InputEventQueue {
-    events: VecDeque<InputEvent>,
+#[derive(Debug)]
+pub struct InputStreamReader {
+    events: Vec<Pin<InputEventSource>>,
     xctx: Rc<Mutex<XContext>>,
-    last_active: time::Instant,
 }
 
-impl InputEventQueue {
+impl InputStreamReader {
     pub fn new(xctx: Rc<Mutex<XContext>>) -> Self {
-        InputEventQueue {
-            events: VecDeque::new(),
+        Self {
+            events: Vec::new(),
             xctx,
-            last_active: time::Instant::now(),
         }
     }
 
-    fn find_insertion_point(&self, event: &mut InputEvent) -> usize {
-        event.remaining = event.interval;
-        debug!(
-            "Looking for insertion point for event with {}s left",
-            duration_as_f32(event.remaining)
-        );
-        for (i, v_event) in self.events.iter().enumerate() {
-            debug!(
-                "	{} <=> {}",
-                duration_as_f32(event.remaining),
-                duration_as_f32(v_event.remaining)
-            );
-            if event.remaining < v_event.remaining {
-                debug!("	Found insertion point!");
-                return i;
-            }
-            event.remaining -= v_event.remaining;
-            debug!(
-                "	time remaining after event in queue: {}",
-                duration_as_f32(event.remaining)
-            );
-        }
-        debug!("	at end of queue!");
-        self.events.len()
-    }
-
-    pub fn add_event(&mut self, mut event: InputEvent) {
-        let insert_index = self.find_insertion_point(&mut event);
-        // Convert keyboard key name to keycode before inserting
-        let mut xctx = self.xctx.lock().expect("X Context lock busy.");
-        event.event.to_x(|name| xctx.keycode_lookup(name.as_str()));
-        if let Some(ref mut next_event) = self.events.get_mut(insert_index) {
-            debug!(
-                "current time delta for next event: {}",
-                duration_as_f32(next_event.remaining)
-            );
-            debug!(
-                "decrementing time delta for next event by {}",
-                duration_as_f32(event.remaining)
-            );
-            next_event.remaining -= event.remaining;
-            debug!(
-                "new time delta for next event: {}",
-                duration_as_f32(next_event.remaining)
-            );
-        }
-        self.events.insert(insert_index, event);
+    pub fn add_event(&mut self, event: InputEventSource) {
+        self.events.push(Pin::new(event));
     }
 
     pub fn run_next(&mut self) -> Result<()> {
-        let event = match self.events.pop_front() {
-            None => {
-                // Sleep here in case run_next is being called in a tight loop
-                // this way we yield time to the OS
-                debug!("Nothing to do...");
-                thread::sleep(time::Duration::from_millis(100));
-                return Ok(());
+        for event_stream in self.events {
+            if let Poll::Ready(e) = event_stream.poll_next() {
+                self.do_event_fake(&e)?;
             }
-            Some(e) => e,
-        };
-        debug!(
-            "wall time passed since last check: {:?}",
-            self.last_active.elapsed()
-        );
-        debug!("event time remaining: {:?}", event.remaining);
-        if event.remaining > self.last_active.elapsed() {
-            // sleep for however much time is left until the next event is ready
-            // minus however much time has passed since the last event ran
-            thread::sleep(event.remaining - self.last_active.elapsed());
-            self.last_active = time::Instant::now();
-        } else {
-            // we're in catch-up time
-            // fast-forward the internal clock by however much time was remaining on this event
-            self.last_active += event.remaining;
         }
-        //self.do_event(&event)?;
-        self.do_event_fake(&event)?;
-        self.add_event(event);
         Ok(())
     }
 
     pub fn paused(&self) -> bool {
-        debug!("Querying numlock state");
+        log::debug!("Querying numlock state");
         let mut indicators: u32 = 0;
         let xctx = self.xctx.lock().expect("X Context lock busy.");
         unsafe {
@@ -445,24 +317,26 @@ impl InputEventQueue {
     }
 
     pub fn start(&mut self, start_delay_ms: u64) -> Result<()> {
-        thread::sleep(time::Duration::from_millis(start_delay_ms));
-        let pause_poll = time::Duration::from_millis(500);
+        thread::sleep(Duration::from_millis(start_delay_ms));
+        for event in self.events {
+            event.reset();
+        }
+        let pause_poll = Duration::from_millis(500);
         let mut noise_ctl = Wrapping(0_u64);
         loop {
             while !self.paused() {
                 self.run_next()?;
             }
             if noise_ctl.0 % 10 == 0 {
-                info!("Paused...");
+                log::info!("Paused...");
             }
             noise_ctl += Wrapping(1_u64);
             thread::sleep(pause_poll);
-            self.last_active = time::Instant::now();
         }
     }
 
-    fn do_event_fake(&self, event: &InputEvent) -> Result<()> {
-        info!(
+    fn do_event_fake(&self, event: &InputEventSource) -> Result<()> {
+        log::info!(
             "{} (next in {:2.3}s)",
             event.event,
             duration_as_f32(event.interval)
@@ -475,20 +349,4 @@ impl InputEventQueue {
         }
         Ok(())
     }
-
-    /*
-    fn do_event(&self, event: &InputEvent) -> Result<()> {
-        info!(
-            "{} (next in {:2.3}s)",
-            event.event,
-            duration_as_f32(event.interval)
-        );
-        let mut xctx = self.xctx.lock().expect("X Context lock busy.");
-        match event.event {
-            InputType::Mouse(ref button) => xctx.mouse_xevent(*button),
-            InputType::Keyboard(ref key) => xctx.key_xevent(key),
-        }
-        Ok(())
-    }
-    */
 }
