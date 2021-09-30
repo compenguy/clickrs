@@ -64,9 +64,13 @@ impl XContext {
             None => ptr::null(),
         };
         unsafe {
+            let display = xlib::XOpenDisplay(name_ptr as *const i8);
+            if display.is_null() {
+                panic!("Failed to open specified display '{:?}'", display_name);
+            }
             XContext {
                 display_name,
-                display: xlib::XOpenDisplay(name_ptr as *const i8),
+                display,
                 window: None,
                 key_name_to_code: HashMap::new(),
             }
