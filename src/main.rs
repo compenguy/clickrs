@@ -3,17 +3,8 @@ use std::string::String;
 use std::sync::Mutex;
 
 use anyhow::Result;
-
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-extern crate loggerv;
-extern crate sys_info;
-
-extern crate regex;
-extern crate x11;
+use clap::{crate_authors, crate_description, crate_name, crate_version};
+use log::{debug, info, warn};
 
 mod errors;
 
@@ -21,7 +12,7 @@ mod inputsource;
 use crate::inputsource::{InputEvent, InputEventQueue, XContext};
 
 fn main() -> Result<()> {
-    let app = app_from_crate!("")
+    let app = clap::app_from_crate!("")
         .setting(clap::AppSettings::ColorAuto)
         .setting(clap::AppSettings::ColoredHelp)
         .arg(

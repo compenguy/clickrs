@@ -1,17 +1,12 @@
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::fmt;
-use std::num::Wrapping;
-use std::ptr;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Mutex;
-use std::thread;
 use std::time;
 
+use log::{debug, info};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use x11::xlib;
-use x11::xtest;
+use x11::{xlib, xtest};
 
 use crate::errors::Error;
 use anyhow::Result;
@@ -50,8 +45,8 @@ pub struct XContext {
     key_name_to_code: HashMap<String, u8>,
 }
 
-impl fmt::Display for XContext {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for XContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let name = self.display_name.clone().unwrap_or_default();
         write!(f, "XDisplay({})", name)
     }
@@ -61,7 +56,7 @@ impl XContext {
     pub fn new(display_name: Option<String>) -> Self {
         let name_ptr = match display_name {
             Some(ref name_str) => name_str.as_ptr(),
-            None => ptr::null(),
+            None => std::ptr::null(),
         };
         unsafe {
             let display = xlib::XOpenDisplay(name_ptr as *const i8);
@@ -244,15 +239,15 @@ pub enum InputType {
 }
 
 impl InputType {
-    fn to_x<F: FnMut(String) -> u8>(&mut self, mut translate_keycode: F) {
+    fn as_x<F: FnMut(String) -> u8>(&mut self, mut translate_keycode: F) {
         if let InputType::Keyboard(key_name) = self {
             *self = InputType::XKeyboard(translate_keycode(key_name.to_owned()))
         }
     }
 }
 
-impl fmt::Display for InputType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for InputType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match *self {
             InputType::Keyboard(ref key) => write!(f, "key {:>8}", key),
             InputType::XKeyboard(ref key) => write!(f, "key {:>8}", key),
@@ -272,8 +267,8 @@ pub struct InputEvent {
     pub remaining: time::Duration,
 }
 
-impl fmt::Display for InputEvent {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for InputEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{} every {:?}", self.event, self.interval)?;
         if self.remaining > time::Duration::from_millis(0) {
             write!(f, " ({:?} remaining)", self.remaining)?;
@@ -386,7 +381,7 @@ impl InputEventQueue {
         let insert_index = self.find_insertion_point(&mut event);
         // Convert keyboard key name to keycode before inserting
         let mut xctx = self.xctx.lock().expect("X Context lock busy.");
-        event.event.to_x(|name| xctx.keycode_lookup(name.as_str()));
+        event.event.as_x(|name| xctx.keycode_lookup(name.as_str()));
         if let Some(ref mut next_event) = self.events.get_mut(insert_index) {
             debug!(
                 "current time delta for next event: {}",
@@ -411,7 +406,7 @@ impl InputEventQueue {
                 // Sleep here in case run_next is being called in a tight loop
                 // this way we yield time to the OS
                 debug!("Nothing to do...");
-                thread::sleep(time::Duration::from_millis(100));
+                std::thread::sleep(time::Duration::from_millis(100));
                 return Ok(());
             }
             Some(e) => e,
@@ -424,7 +419,7 @@ impl InputEventQueue {
         if event.remaining > self.last_active.elapsed() {
             // sleep for however much time is left until the next event is ready
             // minus however much time has passed since the last event ran
-            thread::sleep(event.remaining - self.last_active.elapsed());
+            std::thread::sleep(event.remaining - self.last_active.elapsed());
             self.last_active = time::Instant::now();
         } else {
             // we're in catch-up time
@@ -449,9 +444,9 @@ impl InputEventQueue {
     }
 
     pub fn start(&mut self, start_delay_ms: u64) -> Result<()> {
-        thread::sleep(time::Duration::from_millis(start_delay_ms));
+        std::thread::sleep(time::Duration::from_millis(start_delay_ms));
         let pause_poll = time::Duration::from_millis(500);
-        let mut noise_ctl = Wrapping(0_u64);
+        let mut noise_ctl = std::num::Wrapping(0_u64);
         loop {
             while !self.paused() {
                 self.run_next()?;
@@ -459,8 +454,8 @@ impl InputEventQueue {
             if noise_ctl.0 % 10 == 0 {
                 info!("Paused...");
             }
-            noise_ctl += Wrapping(1_u64);
-            thread::sleep(pause_poll);
+            noise_ctl += std::num::Wrapping(1_u64);
+            std::thread::sleep(pause_poll);
             self.last_active = time::Instant::now();
         }
     }
