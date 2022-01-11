@@ -1,9 +1,8 @@
 use std::rc::Rc;
-use std::string::String;
 use std::sync::Mutex;
 
 use anyhow::Result;
-use clap::{crate_authors, crate_description, crate_name, crate_version};
+use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version};
 use log::{debug, info, warn};
 
 mod errors;
@@ -12,22 +11,20 @@ mod inputsource;
 use crate::inputsource::{InputEvent, InputEventQueue, XContext};
 
 fn main() -> Result<()> {
-    let app = clap::app_from_crate!("")
-        .setting(clap::AppSettings::ColorAuto)
-        .setting(clap::AppSettings::ColoredHelp)
+    let mut app = app_from_crate!("")
         .arg(
-            clap::Arg::with_name("displayname")
-                .short("x")
-                .short("x11-display")
+            clap::Arg::new("displayname")
+                .short('x')
+                .long("x11-display")
                 .help("The X11 display to send the input to. Default: DISPLAY env var.")
                 .value_name("NAME")
                 .takes_value(true)
                 .required(false),
         )
         .arg(
-            clap::Arg::with_name("initial_delay_ms")
-                .short("d")
-                .short("delay")
+            clap::Arg::new("initial_delay_ms")
+                .short('d')
+                .long("delay")
                 .help("Delay in msecs before sending any input events.")
                 .value_name("N")
                 .takes_value(true)
@@ -35,38 +32,37 @@ fn main() -> Result<()> {
                 .default_value("250"),
         )
         .arg(
-            clap::Arg::with_name("mousebutton_and_interval")
-                .short("m")
-                .short("mousebutton-and-interval")
+            clap::Arg::new("mousebutton_and_interval")
+                .short('m')
+                .long("mousebutton-and-interval")
                 .help("Click mouse button X at regular intervals, with Y msecs between.")
                 .value_name("X:Y")
                 .takes_value(true)
-                .multiple(true)
+                .multiple_values(true)
                 .required(false),
         )
         .arg(
-            clap::Arg::with_name("keypress_and_interval")
-                .short("k")
-                .short("keypress-and-interval")
+            clap::Arg::new("keypress_and_interval")
+                .short('k')
+                .long("keypress-and-interval")
                 .help("Press keyboard key X at regular intervals, with Y msecs between.")
                 .value_name("X:Y")
                 .takes_value(true)
-                .multiple(true)
+                .multiple_values(true)
                 .required(false),
         )
         .arg(
-            clap::Arg::with_name("debug")
-                .short("g")
-                .long("debug")
-                .multiple(true)
-                .hidden(true)
-                .help("print debug information"),
+            clap::Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .multiple_occurrences(true)
+                .help("show informational output, repeat for increasing verbosity"),
         );
 
-    let matches = app.get_matches();
+    let matches = app.get_matches_mut();
 
-    // Start logging at "info" verbosity
-    loggerv::init_with_verbosity(1 + matches.occurrences_of("debug")).unwrap();
+    // Start logging at "warn" verbosity
+    loggerv::init_with_verbosity(0 + matches.occurrences_of("verbose")).unwrap();
 
     debug!("{} version {}", crate_name!(), crate_version!());
     debug!(
@@ -95,7 +91,7 @@ fn main() -> Result<()> {
         && matches.occurrences_of("keypress_and_interval") == 0
     {
         warn!("No events specified.  Nothing to do...");
-        println!("{}", matches.usage());
+        println!("{}", app.render_usage());
         return Ok(());
     }
 
@@ -104,7 +100,7 @@ fn main() -> Result<()> {
             event_queue.add_event(InputEvent::parse_mouse(event_str)?);
         }
     } else {
-        info!("No mousebutton events specified.");
+        warn!("No mousebutton events specified.");
     };
 
     if let Some(kevent_strs) = matches.values_of("keypress_and_interval") {
@@ -112,7 +108,7 @@ fn main() -> Result<()> {
             event_queue.add_event(InputEvent::parse_key(event_str)?);
         }
     } else {
-        info!("No key events specified.");
+        warn!("No key events specified.");
     };
 
     debug!("All input events: {:?}", event_queue);
