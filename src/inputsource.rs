@@ -4,8 +4,6 @@ use std::sync::Mutex;
 use std::time;
 
 use log::{debug, info};
-use once_cell::sync::Lazy;
-use regex::Regex;
 use x11::{xlib, xtest};
 
 use crate::errors::Error;
@@ -15,27 +13,6 @@ use anyhow::Result;
 const XKBUSECOREKBD: u32 = 0x0100;
 // X11/X.h:#define None 0L
 //const XNONE: std::os::raw::c_int = 0;
-
-static MOUSE_SPEC_RE: Lazy<Mutex<Regex>> = Lazy::new(|| {
-    Mutex::new(
-        Regex::new(concat!(
-            r"^(?P<button>[[:digit:]])",
-            r":",
-            r"(?P<interval>\d+)$"
-        ))
-        .expect("Failed while processing mouse specification regex"),
-    )
-});
-static KEY_SPEC_RE: Lazy<Mutex<Regex>> = Lazy::new(|| {
-    Mutex::new(
-        Regex::new(concat!(
-            r"^(?P<key>[[:print:]]+)",
-            r":",
-            r"(?P<interval>\d+)$"
-        ))
-        .expect("Failed while processing keyboard specification regex"),
-    )
-});
 
 #[derive(Debug, Clone)]
 pub struct XContext {
@@ -283,56 +260,38 @@ impl InputEvent {
     pub fn parse_mouse(arg: &str) -> Result<Self> {
         debug!("Parsing mouse str option {}.", arg);
 
-        if let Some(caps) = MOUSE_SPEC_RE
-            .lock()
-            .expect("Mouse spec regex lock busy")
-            .captures(arg)
-        {
-            let button = caps
-                .name("button")
-                .ok_or_else(|| Error::InvalidMouseEventSpec(arg.to_owned()))?
-                .as_str()
-                .parse()?;
-            let interval = caps
-                .name("interval")
-                .ok_or_else(|| Error::InvalidMouseEventSpec(arg.to_owned()))?
-                .as_str()
-                .parse()?;
+        if let Some((button_str, interval_str)) = arg.split_once(':') {
+            let button = button_str
+                .parse::<u8>()
+                .map_err(|e| Error::MouseEventButton(button_str.to_owned(), e))?;
+            let interval = interval_str
+                .parse::<u64>()
+                .map_err(|e| Error::InputEventInterval(interval_str.to_owned(), e))?;
             Ok(InputEvent {
                 event: InputType::Mouse(button),
                 interval: time::Duration::from_millis(interval),
                 remaining: time::Duration::from_millis(0),
             })
         } else {
-            Err(Error::InvalidMouseEventSpec(arg.to_owned()).into())
+            Err(Error::MouseEventSpec(arg.to_owned()).into())
         }
     }
 
     pub fn parse_key(arg: &str) -> Result<Self> {
         debug!("Parsing keyboard str option {}.", arg);
 
-        if let Some(caps) = KEY_SPEC_RE
-            .lock()
-            .expect("Keyboard spec regex lock busy")
-            .captures(arg)
-        {
-            let key = caps
-                .name("key")
-                .ok_or_else(|| Error::InvalidKeyboardEventSpec(arg.to_owned()))?
-                .as_str()
-                .to_owned();
-            let interval = caps
-                .name("interval")
-                .ok_or_else(|| Error::InvalidKeyboardEventSpec(arg.to_owned()))?
-                .as_str()
-                .parse()?;
+        if let Some((key_str, interval_str)) = arg.split_once(':') {
+            let key = key_str.to_owned();
+            let interval = interval_str
+                .parse::<u64>()
+                .map_err(|e| Error::InputEventInterval(interval_str.to_owned(), e))?;
             Ok(InputEvent {
                 event: InputType::Keyboard(key),
                 interval: time::Duration::from_millis(interval),
                 remaining: time::Duration::from_millis(0),
             })
         } else {
-            Err(Error::InvalidKeyboardEventSpec(arg.to_owned()).into())
+            Err(Error::KeyboardEventSpec(arg.to_owned()).into())
         }
     }
 }
