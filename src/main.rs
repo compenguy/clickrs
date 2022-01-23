@@ -38,7 +38,7 @@ fn main() -> Result<()> {
                 .help("Click mouse button X at regular intervals, with Y msecs between.")
                 .value_name("X:Y")
                 .takes_value(true)
-                .multiple_values(true)
+                .multiple_occurrences(true)
                 .required(false),
         )
         .arg(
@@ -48,7 +48,7 @@ fn main() -> Result<()> {
                 .help("Press keyboard key X at regular intervals, with Y msecs between.")
                 .value_name("X:Y")
                 .takes_value(true)
-                .multiple_values(true)
+                .multiple_occurrences(true)
                 .required(false),
         )
         .arg(
