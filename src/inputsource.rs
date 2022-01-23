@@ -78,7 +78,9 @@ impl XContext {
             .key_name_to_code
             .entry(key_name.to_owned())
             .or_insert_with(|| unsafe {
-                let keysym = xlib::XStringToKeysym(key_name.as_ptr() as *const i8);
+                let c_key_name =
+                    std::ffi::CString::new(key_name).expect("Invalid string key representation");
+                let keysym = xlib::XStringToKeysym(c_key_name.as_ptr() as *const i8);
                 xlib::XKeysymToKeycode(display, keysym)
             });
         debug!("{} -> {}", key_name, *keycode);
