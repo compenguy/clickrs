@@ -1,14 +1,14 @@
-use std::rc::Rc;
-use std::sync::Mutex;
-
 use anyhow::Result;
 use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version};
 use log::{debug, info, warn};
 
 mod errors;
+mod eventspec;
+mod x11;
 
-mod inputsource;
-use crate::inputsource::{InputEvent, InputEventQueue, XContext};
+use crate::eventspec::EventSpec;
+
+const BASE_VERBOSITY: u64 = 0;
 
 fn main() -> Result<()> {
     let mut app = app_from_crate!("")
@@ -62,7 +62,7 @@ fn main() -> Result<()> {
     let matches = app.get_matches_mut();
 
     // Start logging at "warn" verbosity
-    loggerv::init_with_verbosity(0 + matches.occurrences_of("verbose")).unwrap();
+    loggerv::init_with_verbosity(BASE_VERBOSITY + matches.occurrences_of("verbose")).unwrap();
 
     debug!("{} version {}", crate_name!(), crate_version!());
     debug!(
@@ -82,11 +82,6 @@ fn main() -> Result<()> {
     info!("{}", crate_description!());
     info!("Created by {}", crate_authors!());
 
-    let display = Rc::new(Mutex::new(XContext::new(
-        matches.value_of("displayname").map(|str| str.to_owned()),
-    )));
-    let mut event_queue = InputEventQueue::new(display);
-
     if matches.occurrences_of("mousebutton_and_interval") == 0
         && matches.occurrences_of("keypress_and_interval") == 0
     {
@@ -95,27 +90,39 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let mut eventspecs: Vec<EventSpec> = Vec::with_capacity(2);
     if let Some(mevent_strs) = matches.values_of("mousebutton_and_interval") {
-        for event_str in mevent_strs {
-            event_queue.add_event(InputEvent::parse_mouse(event_str)?);
-        }
+        eventspecs.extend(
+            mevent_strs
+                .into_iter()
+                .map(EventSpec::parse_mouse)
+                .collect::<Result<Vec<EventSpec>>>()?,
+        );
     } else {
         warn!("No mousebutton events specified.");
     };
 
     if let Some(kevent_strs) = matches.values_of("keypress_and_interval") {
-        for event_str in kevent_strs {
-            event_queue.add_event(InputEvent::parse_key(event_str)?);
-        }
+        eventspecs.extend(
+            kevent_strs
+                .into_iter()
+                .map(EventSpec::parse_key)
+                .collect::<Result<Vec<EventSpec>>>()?,
+        );
     } else {
         warn!("No key events specified.");
     };
 
-    debug!("All input events: {:?}", event_queue);
     let start_delay_ms: u64 = matches
         .value_of("initial_delay_ms")
         .unwrap()
         .parse()
         .unwrap();
-    event_queue.start(start_delay_ms)
+
+    #[cfg(feature = "x11")]
+    x11::process_events(
+        matches.value_of("displayname").map(|str| str.to_owned()),
+        eventspecs,
+        std::time::Duration::from_millis(start_delay_ms),
+    )
 }

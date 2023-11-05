@@ -4,7 +4,12 @@ version = "0.1.0"
 authors = ["Will Page <compenguy@gmail.com>"]
 license = "MIT"
 edition = "2018"
-description = "X11 automated keypresser"
+description = "Linux automated keypresser"
+
+[features]
+default = ["wayland"]
+x11 = ["dep:x11"]
+wayland = ["dep:uinput", "dep:evdev"]
 
 [dependencies]
 log = "0.4"
@@ -13,4 +18,6 @@ clap = { version = "3", default-features = false, features = ["std", "cargo"] }
 sys-info = "0.9"
 time = "0.3"
 anyhow = "1"
-x11 = { version = "2", features = ["xlib", "xtest" ] }
+x11 = { version = "2", features = ["xlib", "xtest" ], optional = true }
+uinput = { version = "0.1", optional = true }
+evdev = { version = "0.12", optional = true }

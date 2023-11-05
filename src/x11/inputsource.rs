@@ -6,7 +6,7 @@ use std::time;
 use log::{debug, info};
 use x11::{xlib, xtest};
 
-use crate::errors::Error;
+use crate::eventspec::EventSpec;
 use anyhow::Result;
 
 // X11/extensions/XKB.h:#define    XkbUseCoreKbd           0x0100
@@ -57,7 +57,7 @@ impl XContext {
             .or_insert_with(|| unsafe {
                 let c_key_name =
                     std::ffi::CString::new(key_name).expect("Invalid string key representation");
-                let keysym = xlib::XStringToKeysym(c_key_name.as_ptr() as *const i8);
+                let keysym = xlib::XStringToKeysym(c_key_name.as_ptr());
                 xlib::XKeysymToKeycode(display, keysym)
             });
         debug!("{} -> {}", key_name, *keycode);
@@ -256,42 +256,20 @@ impl std::fmt::Display for InputEvent {
     }
 }
 
-impl InputEvent {
-    pub fn parse_mouse(arg: &str) -> Result<Self> {
-        debug!("Parsing mouse str option {}.", arg);
-
-        if let Some((button_str, interval_str)) = arg.split_once(':') {
-            let button = button_str
-                .parse::<u8>()
-                .map_err(|e| Error::MouseEventButton(button_str.to_owned(), e))?;
-            let interval = interval_str
-                .parse::<u64>()
-                .map_err(|e| Error::InputEventInterval(interval_str.to_owned(), e))?;
-            Ok(InputEvent {
+impl From<EventSpec> for InputEvent {
+    fn from(eventspec: EventSpec) -> Self {
+        let remaining = std::time::Duration::from_millis(0);
+        match eventspec {
+            EventSpec::MouseEvent(button, interval) => InputEvent {
                 event: InputType::Mouse(button),
-                interval: time::Duration::from_millis(interval),
-                remaining: time::Duration::from_millis(0),
-            })
-        } else {
-            Err(Error::MouseEventSpec(arg.to_owned()).into())
-        }
-    }
-
-    pub fn parse_key(arg: &str) -> Result<Self> {
-        debug!("Parsing keyboard str option {}.", arg);
-
-        if let Some((key_str, interval_str)) = arg.split_once(':') {
-            let key = key_str.to_owned();
-            let interval = interval_str
-                .parse::<u64>()
-                .map_err(|e| Error::InputEventInterval(interval_str.to_owned(), e))?;
-            Ok(InputEvent {
+                interval,
+                remaining,
+            },
+            EventSpec::KeyboardEvent(key, interval) => InputEvent {
                 event: InputType::Keyboard(key),
-                interval: time::Duration::from_millis(interval),
-                remaining: time::Duration::from_millis(0),
-            })
-        } else {
-            Err(Error::KeyboardEventSpec(arg.to_owned()).into())
+                interval,
+                remaining,
+            },
         }
     }
 }
@@ -404,8 +382,8 @@ impl InputEventQueue {
         (indicators & 0x02) != 0x02
     }
 
-    pub fn start(&mut self, start_delay_ms: u64) -> Result<()> {
-        std::thread::sleep(time::Duration::from_millis(start_delay_ms));
+    pub fn start(&mut self, start_delay: std::time::Duration) -> Result<()> {
+        std::thread::sleep(start_delay);
         let pause_poll = time::Duration::from_millis(500);
         let mut noise_ctl = std::num::Wrapping(0_u64);
         loop {
