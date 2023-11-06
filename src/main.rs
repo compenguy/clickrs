@@ -1,5 +1,6 @@
-use anyhow::Result;
-use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version};
+use anyhow::{Context, Result};
+use clap::{crate_authors, crate_description, crate_name, crate_version, value_parser, ArgAction};
+use flexi_logger::{detailed_format, Logger};
 use log::{debug, info, warn};
 
 mod errors;
@@ -11,17 +12,17 @@ mod x11;
 
 use crate::eventspec::EventSpec;
 
-const BASE_VERBOSITY: u64 = 0;
+// Start logging this crate at "warn" verbosity
+const BASE_VERBOSITY: u8 = 2;
 
 fn main() -> Result<()> {
-    let mut app = app_from_crate!("")
+    let mut app = clap::command!("")
         .arg(
             clap::Arg::new("displayname")
                 .short('x')
                 .long("x11-display")
                 .help("The X11 display to send the input to. Default: DISPLAY env var.")
                 .value_name("NAME")
-                .takes_value(true)
                 .required(false),
         )
         .arg(
@@ -30,8 +31,8 @@ fn main() -> Result<()> {
                 .long("delay")
                 .help("Delay in msecs before sending any input events.")
                 .value_name("N")
-                .takes_value(true)
                 .required(false)
+                .value_parser(value_parser!(u64))
                 .default_value("250"),
         )
         .arg(
@@ -40,8 +41,7 @@ fn main() -> Result<()> {
                 .long("mousebutton-and-interval")
                 .help("Click mouse button X at regular intervals, with Y msecs between.")
                 .value_name("X:Y")
-                .takes_value(true)
-                .multiple_occurrences(true)
+                .action(ArgAction::Append)
                 .required(false),
         )
         .arg(
@@ -50,22 +50,42 @@ fn main() -> Result<()> {
                 .long("keypress-and-interval")
                 .help("Press keyboard key X at regular intervals, with Y msecs between.")
                 .value_name("X:Y")
-                .takes_value(true)
-                .multiple_occurrences(true)
+                .action(ArgAction::Append)
                 .required(false),
         )
         .arg(
             clap::Arg::new("verbose")
                 .short('v')
                 .long("verbose")
-                .multiple_occurrences(true)
+                .action(clap::ArgAction::Count)
                 .help("show informational output, repeat for increasing verbosity"),
         );
 
     let matches = app.get_matches_mut();
 
-    // Start logging at "warn" verbosity
-    loggerv::init_with_verbosity(BASE_VERBOSITY + matches.occurrences_of("verbose")).unwrap();
+    let crate_log_level = match BASE_VERBOSITY + matches.get_count("verbose") {
+        0 => log::LevelFilter::Off,
+        1 => log::LevelFilter::Error,
+        2 => log::LevelFilter::Warn,
+        3 => log::LevelFilter::Info,
+        4 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    };
+    // At high verbosity, also log errors from other crates
+    let general_log_level = match crate_log_level {
+        log::LevelFilter::Trace | log::LevelFilter::Debug => log::LevelFilter::Error,
+        _ => log::LevelFilter::Off,
+    };
+    let spec = format!(
+        "{}, {} = {}",
+        general_log_level,
+        clap::crate_name!(),
+        crate_log_level
+    );
+    Logger::try_with_str(spec)?
+        .format(detailed_format)
+        .start()
+        .context("Failed to start FlexiLogger logging backend")?;
 
     debug!("{} version {}", crate_name!(), crate_version!());
     debug!(
@@ -85,8 +105,8 @@ fn main() -> Result<()> {
     info!("{}", crate_description!());
     info!("Created by {}", crate_authors!());
 
-    if matches.occurrences_of("mousebutton_and_interval") == 0
-        && matches.occurrences_of("keypress_and_interval") == 0
+    if !matches.contains_id("mousebutton_and_interval")
+        && !matches.contains_id("keypress_and_interval")
     {
         warn!("No events specified.  Nothing to do...");
         println!("{}", app.render_usage());
@@ -94,33 +114,33 @@ fn main() -> Result<()> {
     }
 
     let mut eventspecs: Vec<EventSpec> = Vec::with_capacity(2);
-    if let Some(mevent_strs) = matches.values_of("mousebutton_and_interval") {
-        eventspecs.extend(
-            mevent_strs
-                .into_iter()
-                .map(EventSpec::parse_mouse)
-                .collect::<Result<Vec<EventSpec>>>()?,
-        );
-    } else {
+    let mouse_events = matches
+        .get_many::<String>("mousebutton_and_interval")
+        .unwrap_or_default()
+        .map(|v| v.as_str())
+        .map(EventSpec::parse_mouse)
+        .collect::<Result<Vec<EventSpec>>>()?;
+    if mouse_events.is_empty() {
         warn!("No mousebutton events specified.");
-    };
-
-    if let Some(kevent_strs) = matches.values_of("keypress_and_interval") {
-        eventspecs.extend(
-            kevent_strs
-                .into_iter()
-                .map(EventSpec::parse_key)
-                .collect::<Result<Vec<EventSpec>>>()?,
-        );
     } else {
-        warn!("No key events specified.");
-    };
+        eventspecs.extend(mouse_events);
+    }
 
-    let start_delay_ms: u64 = matches
-        .value_of("initial_delay_ms")
-        .unwrap()
-        .parse()
-        .unwrap();
+    let keyboard_events = matches
+        .get_many::<String>("keypress_and_interval")
+        .unwrap_or_default()
+        .map(|v| v.as_str())
+        .map(EventSpec::parse_key)
+        .collect::<Result<Vec<EventSpec>>>()?;
+    if keyboard_events.is_empty() {
+        warn!("No key events specified.");
+    } else {
+        eventspecs.extend(keyboard_events);
+    }
+
+    let start_delay_ms: u64 = *matches
+        .get_one::<u64>("initial_delay_ms")
+        .expect("Programming Error: Default was specified for this flag, so there should always be a value present");
 
     #[cfg(feature = "x11")]
     x11::process_events(

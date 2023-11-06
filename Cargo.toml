@@ -13,8 +13,8 @@ uinput = ["dep:uinput", "dep:evdev"]
 
 [dependencies]
 log = "0.4"
-loggerv = "0.7"
-clap = { version = "3", default-features = false, features = ["std", "cargo"] }
+flexi_logger = { version = "0.27", default-features = false, features = ["colors"] }
+clap = { version = "4", default-features = false, features = ["std", "cargo"] }
 sys-info = "0.9"
 time = "0.3"
 anyhow = "1"
