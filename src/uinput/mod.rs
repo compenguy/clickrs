@@ -3,7 +3,7 @@ use log::debug;
 
 mod inputsource;
 use crate::eventspec::EventSpec;
-use crate::wayland::inputsource::{InputEvent, InputEventQueue};
+use crate::uinput::inputsource::{InputEvent, InputEventQueue};
 
 pub(crate) fn process_events(
     eventspecs: Vec<EventSpec>,

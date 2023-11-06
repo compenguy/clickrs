@@ -4,11 +4,12 @@ use std::time::{Duration, Instant};
 use crate::EventSpec;
 use anyhow::Result;
 use log::{debug, info};
-use uinput::event::controller::Mouse;
+use uinput::event::controller::Controller::Mouse;
+use uinput::event::controller::Mouse::{Extra, Left, Middle, Right};
 use uinput::event::keyboard::Key;
 use uinput::event::relative::Position::{X, Y};
-use uinput::event::Relative::Position;
-use uinput::Event::Relative;
+use uinput::event::relative::Relative::Position;
+use uinput::event::Event::{Controller, Relative};
 
 struct NumlockWatcher {
     keyboard_devices: Vec<evdev::Device>,
@@ -108,12 +109,12 @@ impl From<u8> for ModifiedEvent {
     fn from(button: u8) -> Self {
         let event = match button {
             // I can't remember whether the x11 code started counting from 0 or 1
-            0 => Mouse::Left.into(),
-            1 => Mouse::Left.into(),
-            2 => Mouse::Middle.into(),
-            3 => Mouse::Right.into(),
+            0 => Left.into(),
+            1 => Left.into(),
+            2 => Middle.into(),
+            3 => Right.into(),
             // TODO: we should error here
-            _ => Mouse::Extra.into(),
+            _ => Extra.into(),
         };
         ModifiedEvent {
             event,
@@ -283,7 +284,10 @@ impl InputEventQueue {
         let device = uinput::default()?
             .name("clickrs")?
             .event(uinput::event::Keyboard::All)?
-            .event(uinput::event::Controller::All)?
+            .event(Controller(Mouse(Left)))?
+            .event(Controller(Mouse(Right)))?
+            .event(Controller(Mouse(Middle)))?
+            // Relative mouse events require a mouse button to be enabled in order to work
             .event(Relative(Position(X)))?
             .event(Relative(Position(Y)))?
             .create()?;

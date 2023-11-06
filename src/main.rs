@@ -4,8 +4,8 @@ use log::{debug, info, warn};
 
 mod errors;
 mod eventspec;
-#[cfg(feature = "wayland")]
-mod wayland;
+#[cfg(feature = "uinput")]
+mod uinput;
 #[cfg(feature = "x11")]
 mod x11;
 
@@ -129,8 +129,8 @@ fn main() -> Result<()> {
         std::time::Duration::from_millis(start_delay_ms),
     )?;
 
-    #[cfg(feature = "wayland")]
-    wayland::process_events(eventspecs, std::time::Duration::from_millis(start_delay_ms))?;
+    #[cfg(feature = "uinput")]
+    uinput::process_events(eventspecs, std::time::Duration::from_millis(start_delay_ms))?;
 
     Ok(())
 }

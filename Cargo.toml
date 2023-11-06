@@ -7,9 +7,9 @@ edition = "2018"
 description = "Linux automated keypresser"
 
 [features]
-default = ["wayland"]
+default = ["uinput"]
 x11 = ["dep:x11"]
-wayland = ["dep:uinput", "dep:evdev"]
+uinput = ["dep:uinput", "dep:evdev"]
 
 [dependencies]
 log = "0.4"
