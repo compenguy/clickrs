@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{crate_authors, crate_description, crate_name, crate_version, value_parser, ArgAction};
-use flexi_logger::{detailed_format, Logger};
+use flexi_logger::Logger;
 use log::{debug, info, warn};
 
 mod errors;
@@ -83,7 +83,6 @@ fn main() -> Result<()> {
         crate_log_level
     );
     Logger::try_with_str(spec)?
-        .format(detailed_format)
         .start()
         .context("Failed to start FlexiLogger logging backend")?;
 
