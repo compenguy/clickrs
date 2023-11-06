@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Mutex;
-use std::time;
+use std::time::Duration;
 
 use log::{debug, info};
 use x11::{xlib, xtest};
@@ -235,21 +235,21 @@ impl std::fmt::Display for InputType {
     }
 }
 
-fn duration_as_f32(duration: time::Duration) -> f32 {
+fn duration_as_f32(duration: Duration) -> f32 {
     (duration.as_secs() as f32) + ((duration.subsec_nanos() as f32) / 1000000000.0)
 }
 
 #[derive(Debug, Clone)]
 pub struct InputEvent {
     pub event: InputType,
-    pub interval: time::Duration,
-    pub remaining: time::Duration,
+    pub interval: Duration,
+    pub remaining: Duration,
 }
 
 impl std::fmt::Display for InputEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{} every {:?}", self.event, self.interval)?;
-        if self.remaining > time::Duration::from_millis(0) {
+        if self.remaining > Duration::from_millis(0) {
             write!(f, " ({:?} remaining)", self.remaining)?;
         }
         Ok(())
@@ -258,7 +258,7 @@ impl std::fmt::Display for InputEvent {
 
 impl From<EventSpec> for InputEvent {
     fn from(eventspec: EventSpec) -> Self {
-        let remaining = std::time::Duration::from_millis(0);
+        let remaining = std::Duration::from_millis(0);
         match eventspec {
             EventSpec::MouseEvent(button, interval) => InputEvent {
                 event: InputType::Mouse(button),
@@ -345,7 +345,7 @@ impl InputEventQueue {
                 // Sleep here in case run_next is being called in a tight loop
                 // this way we yield time to the OS
                 debug!("Nothing to do...");
-                std::thread::sleep(time::Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(100));
                 return Ok(());
             }
             Some(e) => e,
@@ -382,9 +382,9 @@ impl InputEventQueue {
         (indicators & 0x02) != 0x02
     }
 
-    pub fn start(&mut self, start_delay: std::time::Duration) -> Result<()> {
+    pub fn start(&mut self, start_delay: std::Duration) -> Result<()> {
         std::thread::sleep(start_delay);
-        let pause_poll = time::Duration::from_millis(500);
+        let pause_poll = Duration::from_millis(500);
         let mut noise_ctl = std::num::Wrapping(0_u64);
         loop {
             while !self.paused() {
